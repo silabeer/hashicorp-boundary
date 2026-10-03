@@ -1,0 +1,74 @@
+---
+- name: Build projects list from environments
+  ansible.builtin.set_fact:
+    _projects: >-
+      {% set ns = namespace(p=[]) %}
+      {% for env, desc in boundary_environments.items() %}
+      {% set ns.p = ns.p + [
+           {'name': env ~ '-servers', 'description': desc ~ ' (SSH)'},
+           {'name': env ~ '-kubernetes', 'description': desc ~ ' (Kubernetes)'}] %}
+      {% endfor %}
+      {{ ns.p | to_json }}
+
+- name: Normalize projects to list
+  ansible.builtin.set_fact:
+    _projects: "{{ _projects | from_json }}"
+
+- name: Find org scope
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} scopes list -scope-id global -format json \
+      | jq -r --arg n "{{ boundary_scope_org }}" '.items[] | select(.name==$n) | .id'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _org_lookup
+
+- name: Create org scope
+  when: (_org_lookup.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} scopes create -scope-id global \
+      -name {{ boundary_scope_org }} -description "Managed by Ansible (GitOps)" \
+      -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  register: _org_create
+
+- name: Remember org id
+  ansible.builtin.set_fact:
+    _org_id: "{{ (_org_create.stdout | default('')) | trim | default(_org_lookup.stdout | trim, true) }}"
+
+- name: Find projects
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} scopes list -scope-id {{ _org_id }} -format json \
+      | jq -r --arg n "{{ item.name }}" '.items[] | select(.name==$n) | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ _projects }}"
+  changed_when: false
+  register: _proj_lookup
+
+- name: Create missing projects
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} scopes create -scope-id {{ _org_id }} \
+      -name {{ item.item.name }} -description "{{ item.item.description }}" \
+      -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _proj_lookup.results }}"
+  register: _proj_create
+
+- name: Remember project ids (created)
+  ansible.builtin.set_fact:
+    _project_ids: "{{ _project_ids | default({}) | combine({item.item.item.name: (item.stdout | trim)}) }}"
+  loop: "{{ _proj_create.results | default([]) }}"
+
+- name: Remember project ids (existing)
+  ansible.builtin.set_fact:
+    _project_ids: "{{ _project_ids | default({}) | combine({item.item.name: (item.stdout | trim)}) }}"
+  loop: "{{ _proj_lookup.results }}"
+  when: (item.stdout | trim) != ""

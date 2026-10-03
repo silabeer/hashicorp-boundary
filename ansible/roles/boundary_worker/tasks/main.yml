@@ -1,0 +1,40 @@
+---
+- name: Check worker network tag is set
+  ansible.builtin.assert:
+    that:
+      - network | default('') | length > 0
+    fail_msg: >-
+      Для воркера {{ inventory_hostname }} не задан hostvar `network`
+      (имя сети, например network=dc1 в inventory). По нему таргеты
+      находят свой egress-воркер.
+
+- name: Render worker config
+  ansible.builtin.template:
+    src: worker.hcl.j2
+    dest: /etc/boundary.d/worker.hcl
+    owner: root
+    group: boundary
+    mode: "0600"
+  register: _cfg
+
+- name: Install systemd unit
+  ansible.builtin.copy:
+    src: boundary-worker.service
+    dest: /etc/systemd/system/boundary-worker.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _unit
+
+- name: Reload systemd
+  when: _unit.changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# Воркеры с общим ключом worker-auth регистрируются автоматически (KMS-режим):
+# отдельная регистрация не нужна. Статус: `boundary workers list` от админа.
+- name: Start or restart worker
+  ansible.builtin.service:
+    name: boundary-worker
+    state: "{{ 'restarted' if _cfg.changed or _unit.changed or boundary_pkg_install.changed | default(false) else 'started' }}"
+    enabled: true

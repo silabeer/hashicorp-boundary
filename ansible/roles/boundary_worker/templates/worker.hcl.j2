@@ -1,0 +1,34 @@
+# Managed by Ansible (role boundary_worker) — менять в git, не на сервере.
+disable_mlock = true
+
+listener "tcp" {
+  address = "0.0.0.0:9202"
+  purpose = "proxy"
+}
+
+{% set upstreams = [] %}
+{% for h in groups['boundary_controllers'] %}
+{%   set addr = hostvars[h]['boundary_cluster_addr'] | default(hostvars[h]['ansible_host'] | default(h)) %}
+{%   set _ = upstreams.append(addr ~ ':9201') %}
+{% endfor %}
+worker {
+  name              = "{{ inventory_hostname_short }}"
+  initial_upstreams = {{ upstreams | to_json }}
+{% if boundary_public_addr | default('') | length > 0 %}
+  public_addr       = "{{ boundary_public_addr }}"
+{% endif %}
+
+  tags {
+    network = ["{{ network }}"]
+{% for k, v in (boundary_extra_tags | default({})).items() %}
+    {{ k }} = {{ ([v] | flatten) | to_json }}
+{% endfor %}
+  }
+}
+
+kms "aead" {
+  purpose   = "worker-auth"
+  aead_type = "aes-gcm"
+  key       = "{{ boundary_kms_worker_auth_key }}"
+  key_id    = "global_worker-auth"
+}

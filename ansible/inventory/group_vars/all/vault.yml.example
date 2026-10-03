@@ -1,0 +1,21 @@
+# Секреты. Скопируйте в vault.yml, заполните и зашифруйте:
+#   ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml
+# Ключи удобно сгенерировать скриптом: ./scripts/gen-kms-keys.sh
+
+# AES-GCM ключи Boundary (base64, 32 байта).
+boundary_kms_root_key: ""
+boundary_kms_worker_auth_key: ""
+boundary_kms_recovery_key: ""
+
+# Пароль пользователя PostgreSQL (boundary_db_user).
+boundary_db_password: ""
+
+# Токен Vault с политикой для роли vault_ssh_ca_trust (чтение ssh/config/ca).
+vault_token: ""
+
+# Секрет клиента Keycloak (OIDC auth method, boundary_oidc.client_id=boundary).
+keycloak_client_secret: ""
+
+# Орфан-токен Vault для Boundary credential stores.
+# Политика: auth/token/*-self, sys/leases/*, ssh/sign/boundary, k8s-*/creds/*.
+boundary_vault_store_token: ""

@@ -1,0 +1,21 @@
+# Скопируйте в hosts.ini и заполните.
+#
+# boundary_cluster_addr — адрес, по которому ВОРКЕРЫ достигают контроллера
+#   (по умолчанию = ansible_host). Нужен, если контроллер за NAT/LB.
+# network — имя сети воркера: по нему таргеты находят свой egress-воркер
+#   (значения должны совпадать с полем network у серверов/кластеров
+#   в Terraform-переменных).
+# boundary_public_addr — внешний адрес воркера (если клиенты ходят не на
+#   адрес listener'а, например EIP за NAT).
+
+[boundary_controllers]
+ctrl-01 ansible_host=192.168.10.5 boundary_cluster_addr=192.168.10.5
+
+[boundary_workers]
+worker-dc1 ansible_host=10.10.0.5 network=dc1
+worker-dc2 ansible_host=10.20.0.5 network=dc2 boundary_public_addr=203.0.113.5
+
+# Серверы, на которых Ansible разложит публичный ключ Vault SSH CA
+# (роль vault_ssh_ca_trust). Обычно совпадает с группой серверов-таргетов.
+[ssh_servers]
+web-01 ansible_host=10.10.1.11

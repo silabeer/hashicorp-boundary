@@ -1,0 +1,65 @@
+---
+# Желаемое состояние Boundary (GitOps). Конвергируется ролью boundary_config.
+# Секретов здесь НЕТ: client_secret Keycloak и токен Vault — в vault.yml.
+
+# Организация
+boundary_scope_org: core-infra
+
+# Окружения. Из каждого создаются проекты <env>-servers и <env>-kubernetes,
+# managed-группы boundary-<env>-server-access и boundary-<env>-k8s-access,
+# роли server-access / k8s-access в этих проектах.
+boundary_environments:
+  prod: Production
+  # staging: Staging
+  # dev: Development
+
+# OIDC-метод аутентификации (Keycloak) в глобальном скоупе
+boundary_oidc:
+  name: keycloak
+  issuer: https://keycloak.example.com/realms/infra
+  client_id: boundary
+  signing_algorithms: [RS256]
+  claims_scopes: [email, profile, groups]
+  account_claim_maps: ["sub=sub", "email=email", "name=name"]
+
+# Vault-интеграция для SSH (проект <env>-servers)
+boundary_vault:
+  ssh_library_name: ssh-cert
+  ssh_path: ssh/sign/boundary       # роль в SSH-движке Vault
+  ssh_user: ubuntu                  # linux-пользователь на серверах (principal в серте)
+  ssh_key_type: ed25519
+
+# Гранты ролей доступа пользователей (используются для каждого env)
+boundary_access_grants:
+  - "id=*;type=target;actions=read,list,authorize-session"
+  - "id=*;type=session;actions=read,cancel"
+  - "id=*;type=auth-token;actions=read:self,delete:self"
+
+# Серверы-таргеты.
+#   env     — окружение (ключ из boundary_environments)
+#   network — тег воркера, через который пойдёт сессия
+# Имя уникально в рамках env (проект <env>-servers).
+boundary_servers:
+  - {name: web-01, address: 10.10.1.11, network: dc1, env: prod}
+  # - {name: web-stg-01, address: 10.30.1.11, network: dc1, env: staging}
+
+# Kubernetes-кластеры: API через Vault Kubernetes secrets engine.
+#   vault_mount — mount движка в Vault (vault secrets enable -path=<mount> kubernetes)
+#   role        — роль движка, namespace — куда выписывается сервисный аккаунт
+# Имя должно быть уникально ГЛОБАЛЬНО (поиск таргета по имени без скоупа).
+boundary_k8s_clusters:
+  - {name: prod, api_address: 10.20.0.1, network: dc1, env: prod,
+     vault_mount: k8s-prod, role: developer, namespace: default}
+  # - {name: staging, api_address: 10.20.1.1, network: dc1, env: staging,
+  #    vault_mount: k8s-staging, role: developer, namespace: default}
+
+# Точечные доступы: группа Keycloak -> конкретные серверы и/или кластеры.
+# Дополняет env-wide группы boundary-<env>-server-access / -k8s-access.
+# Boundary не умеет deny (grants аддитивны): "запретить" = не выдавать доступ,
+# либо убрать пользователя из группы Keycloak.
+# servers/clusters: список имен из boundary_servers / boundary_k8s_clusters
+# или ['*'] для всех ресурсов env.
+boundary_access_rules:
+  # - {group: boundary-prod-dba, env: prod, servers: [db-01]}
+  # - {group: boundary-prod-dba, env: prod, clusters: [prod]}
+  # - {group: boundary-prod-oncall, env: prod, servers: ['*']}

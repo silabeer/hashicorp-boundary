@@ -1,0 +1,25 @@
+---
+# Общие настройки Boundary (не секреты). Секреты — в group_vars/all/vault.yml.
+
+# Адрес, который видят пользователи (для документации и будущего Terraform).
+boundary_api_fqdn: boundary.example.com
+
+# TLS на API-листенере (9200). Для стенда можно выключить и держать http.
+boundary_tls_enabled: true
+boundary_tls_cert_file: /etc/boundary.d/tls/boundary.crt
+boundary_tls_key_file: /etc/boundary.d/tls/boundary.key
+
+# PostgreSQL для контроллеров.
+boundary_db_host: 127.0.0.1
+boundary_db_port: 5432
+boundary_db_name: boundary
+boundary_db_user: boundary
+boundary_db_sslmode: require
+
+# Пустая строка — последняя версия из репозитория HashiCorp.
+# Для apt указывайте полную версию из `apt list -a boundary`, например "1.2.3-1".
+boundary_version: ""
+
+# Адрес Vault (нужен роли vault_ssh_ca_trust; воркерам нужен доступ к Vault
+# для выдачи креденшелов на сессии).
+vault_addr: https://vault.example.com:8200

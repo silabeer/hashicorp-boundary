@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# bssh — SSH на сервер через Boundary.
+# Аутентификация — сертификатом, который Boundary получает из Vault (SSH CA):
+# Boundary подписывает временный ключ, подкладывает его ssh-клиенту сам.
+#
+# usage: bssh [<env>:]<target> [ssh args...]
+#   env: префикс окружения (prod:/staging:...) или $BSSH_ENV (default: prod)
+set -euo pipefail
+
+t=${1:?usage: bssh [<env>:]<target> [ssh args...]}
+shift
+
+env=${BSSH_ENV:-prod}
+case $t in
+  *:*) env=${t%%:*}; t=${t#*:} ;;
+esac
+
+exec boundary connect ssh \
+  -target-name "$t" \
+  -target-scope-name "$env-servers" \
+  -- "$@"

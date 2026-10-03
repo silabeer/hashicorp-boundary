@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# bkube — kubectl через Boundary с токеном сервисного аккаунта из Vault.
+#
+# Что происходит:
+#   1. authorize-session → Boundary через Vault выдаёт временный SA-токен кластера;
+#   2. boundary connect kube поднимает локальный прокси до API-сервера;
+#   3. kubectl вызывается с --server=<прокси> --token=<SA-токен>.
+#
+# usage: bkube <target-name|ttcp_...> [kubectl args...]
+# env:
+#   BKUBE_CA          — путь к CA кластера (иначе --insecure-skip-tls-verify)
+#   BKUBE_SERVER_NAME — имя API-сервера для проверки TLS (--tls-server-name)
+set -euo pipefail
+
+target=${1:?usage: bkube <target-name|ttcp_...> [kubectl args...]}
+shift
+
+# Резолвим имя таргета в ID (можно сразу передавать ttcp_...).
+if [[ $target != ttcp_* ]]; then
+  target=$(boundary targets list -recursive -filter "\"name\"==\"$target\"" -format json \
+    | jq -r '.items[0].id // empty')
+  [[ -n $target ]] || { echo "bkube: target не найден" >&2; exit 1; }
+fi
+
+authz=$(boundary targets authorize-session -id "$target" -format json)
+token=$(jq -r '.item.credentials[0].secret.decoded.service_account_token // empty' <<<"$authz")
+[[ -n $token ]] || {
+  echo "bkube: у цели нет brokered-креденшелов (Vault-библиотека не привязана к таргету?)" >&2
+  exit 1
+}
+at=$(jq -r '.item.authorization_token // .item.token // empty' <<<"$authz")
+
+tls_args=(--insecure-skip-tls-verify=true)
+if [[ -n ${BKUBE_CA:-} ]]; then
+  tls_args=(--certificate-authority="$BKUBE_CA")
+  [[ -n ${BKUBE_SERVER_NAME:-} ]] && tls_args+=(--tls-server-name="$BKUBE_SERVER_NAME")
+fi
+
+exec boundary connect kube -target-id "$target" ${at:+-authz-token "$at"} -- \
+  --token="$token" "${tls_args[@]}" "$@"

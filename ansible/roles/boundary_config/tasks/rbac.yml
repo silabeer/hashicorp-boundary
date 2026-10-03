@@ -1,0 +1,127 @@
+---
+- name: Build managed group names (env-wide + из access rules, без дублей)
+  ansible.builtin.set_fact:
+    _managed_groups: >-
+      {% set ns = namespace(g=['boundary-admins']) %}
+      {% for env in boundary_environments %}
+      {% set ns.g = ns.g + ['boundary-' ~ env ~ '-server-access',
+                            'boundary-' ~ env ~ '-k8s-access'] %}
+      {% endfor %}
+      {% for rule in boundary_access_rules | default([]) %}
+      {% set ns.g = ns.g + [rule.group] %}
+      {% endfor %}
+      {{ ns.g | unique | to_json }}
+
+- name: Normalize managed groups to list
+  ansible.builtin.set_fact:
+    _managed_groups: "{{ _managed_groups | from_json }}"
+
+- name: Build RBAC roles from environments
+  ansible.builtin.set_fact:
+    _rbac_roles: >-
+      {% set ns = namespace(r=[{
+           'name': 'global-admins',
+           'scope': 'global',
+           'group': 'boundary-admins',
+           'grants': ['id=*;type=*;actions=*']}]) %}
+      {% for env in boundary_environments %}
+      {% set ns.r = ns.r + [
+           {'name': 'server-access',
+            'scope': env ~ '-servers',
+            'group': 'boundary-' ~ env ~ '-server-access',
+            'grants': boundary_access_grants},
+           {'name': 'k8s-access',
+            'scope': env ~ '-kubernetes',
+            'group': 'boundary-' ~ env ~ '-k8s-access',
+            'grants': boundary_access_grants}] %}
+      {% endfor %}
+      {{ ns.r | to_json }}
+
+- name: Normalize RBAC roles to list
+  ansible.builtin.set_fact:
+    _rbac_roles: "{{ _rbac_roles | from_json }}"
+
+- name: Find managed groups
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} managed-groups list -auth-method-id {{ _am_id }} -format json \
+      | jq -r --arg n "{{ item }}" '.items[] | select(.name==$n) | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ _managed_groups }}"
+  changed_when: false
+  register: _mg_lookup
+
+- name: Create managed groups
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} managed-groups create oidc -auth-method-id {{ _am_id }} \
+      -name {{ item.item }} \
+      -filter '{{ '"' ~ item.item ~ '" in "/token/groups"' }}' \
+      -description "Managed by Ansible (GitOps)" -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _mg_lookup.results }}"
+  register: _mg_create
+
+- name: Update managed groups
+  when: (item.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} managed-groups update oidc -id {{ item.stdout | trim }} \
+      -filter '{{ '"' ~ item.item ~ '" in "/token/groups"' }}' >/dev/null
+  args:
+    executable: /bin/bash
+  loop: "{{ _mg_lookup.results }}"
+  changed_when: false
+
+- name: Remember managed group ids (created)
+  ansible.builtin.set_fact:
+    _mg_ids: "{{ _mg_ids | default({}) | combine({item.item.item: (item.stdout | trim)}) }}"
+  loop: "{{ _mg_create.results | default([]) }}"
+
+- name: Remember managed group ids (existing)
+  ansible.builtin.set_fact:
+    _mg_ids: "{{ _mg_ids | default({}) | combine({item.item: (item.stdout | trim)}) }}"
+  loop: "{{ _mg_lookup.results }}"
+  when: (item.stdout | trim) != ""
+
+- name: Find roles
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} roles list -scope-id {{ 'global' if item.scope == 'global' else _project_ids[item.scope] }} -format json \
+      | jq -r --arg n "{{ item.name }}" '.items[] | select(.name==$n) | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ _rbac_roles }}"
+  changed_when: false
+  register: _role_lookup
+
+- name: Create roles
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} roles create \
+      -scope-id {{ 'global' if item.item.scope == 'global' else _project_ids[item.item.scope] }} \
+      -name {{ item.item.name }} -description "Managed by Ansible (GitOps)" \
+      {% for g in item.item.grants %}-grant-string '{{ g }}' {% endfor %} \
+      -principal-id {{ _mg_ids[item.item.group] }} \
+      -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _role_lookup.results }}"
+  register: _role_create
+
+- name: Converge grants and principals of existing roles
+  when: (item.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} roles set-grant-strings -id {{ item.stdout | trim }} \
+      {% for g in item.item.grants %}-grant-string '{{ g }}' {% endfor %} >/dev/null
+    {{ _boundary_conn_flags }} roles set-principals -id {{ item.stdout | trim }} \
+      -principal-id {{ _mg_ids[item.item.group] }} >/dev/null
+  args:
+    executable: /bin/bash
+  loop: "{{ _role_lookup.results }}"
+  changed_when: false

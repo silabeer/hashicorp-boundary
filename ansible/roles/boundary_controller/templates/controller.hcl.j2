@@ -1,0 +1,46 @@
+# Managed by Ansible (role boundary_controller) — менять в git, не на сервере.
+disable_mlock = true
+
+controller {
+  name = "{{ inventory_hostname_short }}"
+  database {
+    url = "postgresql://{{ boundary_db_user }}:{{ boundary_db_password }}@{{ boundary_db_host }}:{{ boundary_db_port | default(5432) }}/{{ boundary_db_name }}?sslmode={{ boundary_db_sslmode | default('require') }}"
+  }
+}
+
+listener "tcp" {
+  address = "0.0.0.0:9200"
+  purpose = "api"
+{% if boundary_tls_enabled %}
+  tls_cert_file = "{{ boundary_tls_cert_file }}"
+  tls_key_file  = "{{ boundary_tls_key_file }}"
+{% else %}
+  tls_disable = true
+{% endif %}
+}
+
+listener "tcp" {
+  address = "0.0.0.0:9201"
+  purpose = "cluster"
+}
+
+kms "aead" {
+  purpose   = "root"
+  aead_type = "aes-gcm"
+  key       = "{{ boundary_kms_root_key }}"
+  key_id    = "global_root"
+}
+
+kms "aead" {
+  purpose   = "worker-auth"
+  aead_type = "aes-gcm"
+  key       = "{{ boundary_kms_worker_auth_key }}"
+  key_id    = "global_worker-auth"
+}
+
+kms "aead" {
+  purpose   = "recovery"
+  aead_type = "aes-gcm"
+  key       = "{{ boundary_kms_recovery_key }}"
+  key_id    = "global_recovery"
+}

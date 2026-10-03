@@ -1,0 +1,59 @@
+---
+- name: Preflight — CLI + recovery KMS работают
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} scopes list -scope-id global -format json >/dev/null
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Preflight — секреты заданы
+  ansible.builtin.assert:
+    that:
+      - keycloak_client_secret | default('') | length > 0
+      - boundary_vault_store_token | default('') | length > 0
+    fail_msg: >-
+      Заполните keycloak_client_secret и boundary_vault_store_token
+      в ansible/inventory/group_vars/all/vault.yml
+
+- name: Preflight — у всех ресурсов корректный env
+  ansible.builtin.assert:
+    that:
+      - (boundary_servers | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
+      - (boundary_k8s_clusters | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
+    fail_msg: >-
+      Есть серверы/кластеры с env, которого нет в boundary_environments
+      (domain_config.yml).
+
+- name: Preflight — access rules ссылаются на существующие ресурсы
+  ansible.builtin.assert:
+    that:
+      - (boundary_access_rules | default([]) | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
+      - (boundary_access_rules | default([]) | selectattr('servers', 'defined') | map(attribute='servers') | flatten | unique | reject('eq', '*') | list)
+        | difference(boundary_servers | map(attribute='name') | list) | length == 0
+      - (boundary_access_rules | default([]) | selectattr('clusters', 'defined') | map(attribute='clusters') | flatten | unique | reject('eq', '*') | list)
+        | difference(boundary_k8s_clusters | map(attribute='name') | list) | length == 0
+    fail_msg: >-
+      boundary_access_rules ссылается на несуществующий env/сервер/кластер
+      (domain_config.yml).
+
+- name: Configure scopes
+  ansible.builtin.import_tasks: scopes.yml
+
+- name: Configure OIDC auth method
+  ansible.builtin.import_tasks: auth.yml
+
+- name: Configure managed groups and roles
+  ansible.builtin.import_tasks: rbac.yml
+
+- name: Configure fine-grained access rules
+  ansible.builtin.import_tasks: access.yml
+
+- name: Configure credential stores and libraries
+  ansible.builtin.import_tasks: credentials.yml
+
+- name: Configure hosts
+  ansible.builtin.import_tasks: hosts.yml
+
+- name: Configure targets
+  ansible.builtin.import_tasks: targets.yml

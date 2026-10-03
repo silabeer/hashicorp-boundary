@@ -1,0 +1,24 @@
+[Unit]
+Description=HashiCorp Boundary Controller
+Documentation=https://developer.hashicorp.com/boundary/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=boundary
+Group=boundary
+ExecStart=/usr/bin/boundary server -config=/etc/boundary.d/controller.hcl
+
+LimitMEMLOCK=infinity
+LimitNOFILE=65536
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

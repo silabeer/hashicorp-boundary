@@ -1,0 +1,76 @@
+---
+- name: Check TLS certificate exists
+  when: boundary_tls_enabled
+  ansible.builtin.stat:
+    path: "{{ boundary_tls_cert_file }}"
+  register: _tls_cert
+
+- name: Fail if TLS certificate is missing
+  when: boundary_tls_enabled and not _tls_cert.stat.exists
+  ansible.builtin.fail:
+    msg: >-
+      Не найден сертификат {{ boundary_tls_cert_file }}.
+      Выпустите его (certbot / внутренний CA) или отключите TLS
+      (boundary_tls_enabled: false) для стенда.
+
+- name: Render controller config
+  ansible.builtin.template:
+    src: controller.hcl.j2
+    dest: /etc/boundary.d/controller.hcl
+    owner: root
+    group: boundary
+    mode: "0600"
+  register: _cfg
+
+- name: Install recovery KMS config (для recovery-доступа и Ansible-управления)
+  ansible.builtin.template:
+    src: recovery-kms.hcl.j2
+    dest: /etc/boundary.d/recovery-kms.hcl
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install systemd unit
+  ansible.builtin.copy:
+    src: boundary-controller.service
+    dest: /etc/systemd/system/boundary-controller.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _unit
+
+- name: Reload systemd
+  when: _unit.changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Initialize Boundary database (first controller only)
+  ansible.builtin.command: /usr/bin/boundary database init -config /etc/boundary.d/controller.hcl
+  run_once: true
+  no_log: true
+  register: _db_init
+  # Повторный прогон: Boundary отвечает ошибкой "already been initialized".
+  failed_when: _db_init.rc != 0 and 'initialized' not in (_db_init.stderr ~ _db_init.stdout)
+  changed_when: _db_init.rc == 0
+
+- name: Save initial admin credentials on the controller
+  when: _db_init.changed
+  ansible.builtin.copy:
+    content: "{{ _db_init.stdout }}\n"
+    dest: /root/boundary-initial-login.txt
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Apply database migrations (no-op if up to date)
+  ansible.builtin.command: /usr/bin/boundary database migrate -config /etc/boundary.d/controller.hcl
+  run_once: true
+  register: _db_migrate
+  changed_when: false
+
+- name: Start or restart controller
+  ansible.builtin.service:
+    name: boundary-controller
+    state: "{{ 'restarted' if _cfg.changed or _unit.changed or boundary_pkg_install.changed | default(false) else 'started' }}"
+    enabled: true

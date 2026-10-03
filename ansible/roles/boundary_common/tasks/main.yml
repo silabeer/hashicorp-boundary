@@ -1,0 +1,94 @@
+---
+- name: Check KMS keys are set
+  ansible.builtin.assert:
+    that:
+      - boundary_kms_root_key | default('') | length > 0
+      - boundary_kms_worker_auth_key | default('') | length > 0
+      - boundary_kms_recovery_key | default('') | length > 0
+    fail_msg: >-
+      Не заданы KMS-ключи. Запустите ./scripts/gen-kms-keys.sh,
+      заполните ansible/inventory/group_vars/all/vault.yml и зашифруйте его
+      (ansible-vault encrypt ...).
+
+- name: Create boundary system group
+  ansible.builtin.group:
+    name: boundary
+    system: true
+
+- name: Create boundary system user
+  ansible.builtin.user:
+    name: boundary
+    group: boundary
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Add HashiCorp APT repository
+  when: ansible_os_family == 'Debian'
+  block:
+    - name: Add HashiCorp GPG key
+      ansible.builtin.apt_key:
+        url: https://apt.releases.hashicorp.com/gpg
+        keyring: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        state: present
+
+    - name: Add HashiCorp repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ ansible_facts['distribution_release'] }} main"
+        filename: hashicorp
+        state: present
+        update_cache: true
+
+- name: Add HashiCorp YUM repository
+  when: ansible_os_family == 'RedHat'
+  ansible.builtin.yum_repository:
+    name: hashicorp
+    description: HashiCorp Stable
+    baseurl: https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/stable
+    gpgkey: https://rpm.releases.hashicorp.com/gpg
+    gpgcheck: true
+    enabled: true
+
+- name: Install Boundary (pinned version)
+  when: boundary_version | length > 0
+  ansible.builtin.package:
+    name: "{{ 'boundary=' ~ boundary_version if ansible_os_family == 'Debian' else 'boundary-' ~ boundary_version }}"
+    update_cache: "{{ ansible_os_family == 'Debian' }}"
+  register: boundary_pkg_install
+
+- name: Install Boundary (latest)
+  when: boundary_version | length == 0
+  ansible.builtin.package:
+    name: boundary
+    update_cache: "{{ ansible_os_family == 'Debian' }}"
+  register: boundary_pkg_install
+
+- name: Install jq (парсинг JSON в роли boundary_config)
+  ansible.builtin.package:
+    name: jq
+    state: present
+
+- name: Create /etc/boundary.d
+  ansible.builtin.file:
+    path: /etc/boundary.d
+    state: directory
+    owner: root
+    group: boundary
+    mode: "0750"
+
+- name: Create /var/lib/boundary
+  ansible.builtin.file:
+    path: /var/lib/boundary
+    state: directory
+    owner: boundary
+    group: boundary
+    mode: "0750"
+
+- name: Create TLS directory
+  when: boundary_tls_enabled
+  ansible.builtin.file:
+    path: /etc/boundary.d/tls
+    state: directory
+    owner: root
+    group: boundary
+    mode: "0750"

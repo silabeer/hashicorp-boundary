@@ -1,0 +1,49 @@
+---
+- name: Find OIDC auth method
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} auth-methods list -scope-id global -format json \
+      | jq -r --arg n "{{ boundary_oidc.name }}" '.items[] | select(.name==$n and .type=="oidc") | .id'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _am_lookup
+
+- name: Build OIDC flags
+  ansible.builtin.set_fact:
+    _oidc_flags: >-
+      -name {{ boundary_oidc.name }}
+      -description "Managed by Ansible (GitOps)"
+      -issuer {{ boundary_oidc.issuer }}
+      -client-id {{ boundary_oidc.client_id }}
+      -client-secret {{ keycloak_client_secret }}
+      -api-url-prefix {{ boundary_config_addr }}
+      {% for a in boundary_oidc.signing_algorithms %}-signing-algorithm {{ a }} {% endfor %}
+      {% for s in boundary_oidc.claims_scopes %}-claims-scope {{ s }} {% endfor %}
+      {% for m in boundary_oidc.account_claim_maps %}-account-claim-map {{ m }} {% endfor %}
+
+- name: Create OIDC auth method
+  when: (_am_lookup.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} auth-methods create oidc -scope-id global {{ _oidc_flags }} \
+      -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  no_log: true
+  register: _am_create
+
+- name: Update OIDC auth method
+  when: (_am_lookup.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} auth-methods update oidc -id {{ _am_lookup.stdout | trim }} \
+      {{ _oidc_flags }} -format json >/dev/null
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: false
+
+- name: Remember auth method id
+  ansible.builtin.set_fact:
+    _am_id: "{{ (_am_create.stdout | default('')) | trim | default(_am_lookup.stdout | trim, true) }}"

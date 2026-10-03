@@ -1,0 +1,6 @@
+kms "aead" {
+  purpose   = "recovery"
+  aead_type = "aes-gcm"
+  key       = "{{ boundary_kms_recovery_key }}"
+  key_id    = "global_recovery"
+}

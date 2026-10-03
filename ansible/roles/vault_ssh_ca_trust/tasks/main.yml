@@ -1,0 +1,35 @@
+---
+- name: Ensure SSH user exists (техническая учётка для входа по сертификату)
+  ansible.builtin.user:
+    name: "{{ boundary_vault.ssh_user }}"
+    comment: "Boundary SSH access"
+    shell: /bin/bash
+    state: present
+
+- name: Get Vault SSH CA public key
+  ansible.builtin.uri:
+    url: "{{ vault_addr }}/v1/ssh/config/ca"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_token }}"
+    return_content: true
+  run_once: true
+  delegate_to: localhost
+  become: false
+  register: _vault_ssh_ca
+
+- name: Install trusted CA key
+  ansible.builtin.copy:
+    content: "{{ _vault_ssh_ca.json.data.public_key }}\n"
+    dest: /etc/ssh/trusted-user-ca-keys.pub
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable TrustedUserCAKeys in sshd
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*TrustedUserCAKeys'
+    line: 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pub'
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd

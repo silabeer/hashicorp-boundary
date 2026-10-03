@@ -1,0 +1,24 @@
+---
+- name: Boundary controllers
+  hosts: boundary_controllers
+  roles:
+    - boundary_common
+    - boundary_controller
+
+- name: Boundary workers
+  hosts: boundary_workers
+  roles:
+    - boundary_common
+    - boundary_worker
+
+- name: Boundary domain configuration (GitOps)
+  hosts: boundary_controllers[0]
+  gather_facts: false
+  tags: [boundary_config]
+  roles:
+    - boundary_config
+
+- name: Trust Vault SSH CA on target servers
+  hosts: ssh_servers
+  roles:
+    - vault_ssh_ca_trust

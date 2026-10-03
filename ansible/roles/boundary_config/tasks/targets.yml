@@ -1,0 +1,87 @@
+---
+- name: Find SSH targets
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets list -scope-id {{ _project_ids[item.env ~ '-servers'] }} -format json \
+      | jq -r --arg n "{{ item.name }}" '.items[] | select(.name==$n and .type=="ssh") | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ boundary_servers }}"
+  changed_when: false
+  register: _t_ssh_lookup
+
+- name: Create SSH targets
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets create ssh \
+      -scope-id {{ _project_ids[item.item.env ~ '-servers'] }} \
+      -name {{ item.item.name }} -default-port 22 \
+      -session-connection-limit -1 \
+      -host-source {{ _host_set_ids[item.item.env ~ '/' ~ item.item.name] }} \
+      -injected-application-credential-source {{ _ssh_lib_ids[item.item.env] }} \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' \
+      -description "Managed by Ansible (GitOps)" -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_ssh_lookup.results }}"
+  register: _t_ssh_create
+
+- name: Update SSH targets
+  when: (item.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets update ssh -id {{ item.stdout | trim }} \
+      -default-port 22 -session-connection-limit -1 \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' >/dev/null
+    {{ _boundary_conn_flags }} targets set-host-sources -id {{ item.stdout | trim }} \
+      -host-source {{ _host_set_ids[item.item.env ~ '/' ~ item.item.name] }} >/dev/null
+    {{ _boundary_conn_flags }} targets set-credential-sources -id {{ item.stdout | trim }} \
+      -injected-application-credential-source {{ _ssh_lib_ids[item.item.env] }} >/dev/null
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_ssh_lookup.results }}"
+  changed_when: false
+
+- name: Find k8s targets
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets list -scope-id {{ _project_ids[item.env ~ '-kubernetes'] }} -format json \
+      | jq -r --arg n "{{ item.name }}" '.items[] | select(.name==$n and .type=="tcp") | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ boundary_k8s_clusters }}"
+  changed_when: false
+  register: _t_k8s_lookup
+
+- name: Create k8s targets
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets create tcp \
+      -scope-id {{ _project_ids[item.item.env ~ '-kubernetes'] }} \
+      -name {{ item.item.name }} \
+      -address {{ item.item.api_address }} \
+      -default-port 443 -session-connection-limit -1 \
+      -brokered-credential-source {{ _lib_k8s_ids[item.item.name] }} \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' \
+      -description "Managed by Ansible (GitOps)" -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_k8s_lookup.results }}"
+  register: _t_k8s_create
+
+- name: Update k8s targets
+  when: (item.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets update tcp -id {{ item.stdout | trim }} \
+      -address {{ item.item.api_address }} \
+      -default-port 443 -session-connection-limit -1 \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' >/dev/null
+    {{ _boundary_conn_flags }} targets set-credential-sources -id {{ item.stdout | trim }} \
+      -brokered-credential-source {{ _lib_k8s_ids[item.item.name] }} >/dev/null
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_k8s_lookup.results }}"
+  changed_when: false

@@ -1,0 +1,84 @@
+---
+# Точечные доступы: группа Keycloak -> конкретные серверы/кластеры.
+# Гранты строятся на ID таргетов (ID резолвятся по именам при apply —
+# в git остаются только стабильные имена).
+
+- name: Resolve target ids for server access rules
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets list -scope-id {{ _project_ids[item.env ~ '-servers'] }} -format json \
+      | jq -r --argjson names '{{ item.servers | to_json }}' \
+          '[.items[] | select(.name as $n | $names | index($n)) | .id] | join(",")'
+  args:
+    executable: /bin/bash
+  loop: "{{ boundary_access_rules | default([]) | selectattr('servers', 'defined') | list }}"
+  when: "'*' not in item.servers"
+  changed_when: false
+  register: _rule_srv
+
+- name: Ensure server access roles
+  ansible.builtin.shell: |
+    set -o pipefail
+    IDS="{{ '*' if ('*' in item.item.servers) else (item.stdout | trim) }}"
+    SCOPE="{{ _project_ids[item.item.env ~ '-servers'] }}"
+    RID=$({{ _boundary_conn_flags }} roles list -scope-id "$SCOPE" -format json \
+      | jq -r --arg n "access-{{ item.item.group }}" '.items[] | select(.name==$n) | .id')
+    if [ -z "$RID" ]; then
+      {{ _boundary_conn_flags }} roles create -scope-id "$SCOPE" \
+        -name "access-{{ item.item.group }}" -description "Managed by Ansible (GitOps)" \
+        -grant-string "id=${IDS};type=target;actions=read,list,authorize-session" \
+        -grant-string 'id=*;type=session;actions=read,cancel' \
+        -grant-string 'id=*;type=auth-token;actions=read:self,delete:self' \
+        -principal-id {{ _mg_ids[item.item.group] }} >/dev/null
+    else
+      {{ _boundary_conn_flags }} roles set-grant-strings -id "$RID" \
+        -grant-string "id=${IDS};type=target;actions=read,list,authorize-session" \
+        -grant-string 'id=*;type=session;actions=read,cancel' \
+        -grant-string 'id=*;type=auth-token;actions=read:self,delete:self' >/dev/null
+      {{ _boundary_conn_flags }} roles set-principals -id "$RID" \
+        -principal-id {{ _mg_ids[item.item.group] }} >/dev/null
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ _rule_srv.results }}"
+  changed_when: false
+
+- name: Resolve target ids for k8s access rules
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets list -scope-id {{ _project_ids[item.env ~ '-kubernetes'] }} -format json \
+      | jq -r --argjson names '{{ item.clusters | to_json }}' \
+          '[.items[] | select(.name as $n | $names | index($n)) | .id] | join(",")'
+  args:
+    executable: /bin/bash
+  loop: "{{ boundary_access_rules | default([]) | selectattr('clusters', 'defined') | list }}"
+  when: "'*' not in item.clusters"
+  changed_when: false
+  register: _rule_k8s
+
+- name: Ensure k8s access roles
+  ansible.builtin.shell: |
+    set -o pipefail
+    IDS="{{ '*' if ('*' in item.item.clusters) else (item.stdout | trim) }}"
+    SCOPE="{{ _project_ids[item.item.env ~ '-kubernetes'] }}"
+    RID=$({{ _boundary_conn_flags }} roles list -scope-id "$SCOPE" -format json \
+      | jq -r --arg n "access-{{ item.item.group }}" '.items[] | select(.name==$n) | .id')
+    if [ -z "$RID" ]; then
+      {{ _boundary_conn_flags }} roles create -scope-id "$SCOPE" \
+        -name "access-{{ item.item.group }}" -description "Managed by Ansible (GitOps)" \
+        -grant-string "id=${IDS};type=target;actions=read,list,authorize-session" \
+        -grant-string 'id=*;type=session;actions=read,cancel' \
+        -grant-string 'id=*;type=auth-token;actions=read:self,delete:self' \
+        -principal-id {{ _mg_ids[item.item.group] }} >/dev/null
+    else
+      {{ _boundary_conn_flags }} roles set-grant-strings -id "$RID" \
+        -grant-string "id=${IDS};type=target;actions=read,list,authorize-session" \
+        -grant-string 'id=*;type=session;actions=read,cancel' \
+        -grant-string 'id=*;type=auth-token;actions=read:self,delete:self' >/dev/null
+      {{ _boundary_conn_flags }} roles set-principals -id "$RID" \
+        -principal-id {{ _mg_ids[item.item.group] }} >/dev/null
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ _rule_k8s.results }}"
+  changed_when: false

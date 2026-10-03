@@ -1,0 +1,12 @@
+---
+boundary_config_addr: "https://{{ boundary_api_fqdn }}:9200"
+# true — не проверять TLS API (самоподписанный/внутренний CA).
+# false, когда сертификат контроллера доверенный (или задайте BOUNDARY_CACERT через окружение).
+boundary_config_tls_insecure: true
+boundary_recovery_config: /etc/boundary.d/recovery-kms.hcl
+
+_boundary_conn_flags: >-
+  -addr={{ boundary_config_addr }}
+  {{ '-tls-insecure' if boundary_config_tls_insecure | bool }}
+  -keyring-type none
+  -recovery-config {{ boundary_recovery_config }}

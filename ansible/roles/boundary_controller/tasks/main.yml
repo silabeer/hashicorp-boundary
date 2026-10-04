@@ -30,6 +30,15 @@
     group: root
     mode: "0600"
 
+- name: Create audit log directory
+  when: boundary_audit_file_enabled
+  ansible.builtin.file:
+    path: "{{ boundary_audit_log_dir }}"
+    state: directory
+    owner: boundary
+    group: boundary
+    mode: "0750"
+
 - name: Install systemd unit
   ansible.builtin.copy:
     src: boundary-controller.service

@@ -285,6 +285,25 @@ Boundary сам продлевает store-токен; при пересозда
 
 ## FAQ
 
+### Аудит сессий пишется в файл?
+
+Да. Важный нюанс: в Boundary по умолчанию `audit_enabled = false` — аудит
+выключен. Контроллеры из этого репозитория настроены иначе
+(`ansible/roles/boundary_controller/templates/controller.hcl.j2`):
+
+- все события дублируются в journald (`journalctl -u boundary-controller`);
+- аудит и observation-события пишутся в файл
+  `/var/log/boundary/audit.ndjson` (формат cloudevents-json, ротация по
+  размеру/времени — параметры `boundary_audit_*` в `boundary.yml`).
+
+Внутри: кто аутентифицировался (Keycloak identity), authorize-session
+(пользователь → таргет), старт/стоп сессий и соединений, управляющие
+действия. Ключи/пароли/токены в события не попадают.
+
+Чего в файле НЕТ: записи команд и вывода терминала — это session recording
+(BSR), фича Enterprise/HCP. Для долгосрочного хранения забирайте ndjson
+fluent-bit/vector → SIEM.
+
 ### Как разрешать/запрещать доступ пользователей к разным серверам?
 
 Только через членство в группах Keycloak — `id=*` в env-wide группах (все

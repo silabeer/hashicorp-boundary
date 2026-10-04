@@ -24,6 +24,35 @@ listener "tcp" {
   purpose = "cluster"
 }
 
+events {
+  audit_enabled        = true
+  observations_enabled = true
+  sysevents_enabled    = true
+
+  sink "stderr" {
+    name        = "stderr"
+    description = "Все события в journald"
+    event_types = ["*"]
+    format      = "cloudevents-json"
+  }
+{% if boundary_audit_file_enabled %}
+
+  sink {
+    name        = "audit-file"
+    description = "Аудит и события сессий в файл"
+    event_types = ["audit", "observation"]
+    format      = "cloudevents-json"
+    file {
+      path             = "{{ boundary_audit_log_dir }}"
+      file_name        = "audit.ndjson"
+      rotate_bytes     = {{ boundary_audit_rotate_bytes }}
+      rotate_duration  = "{{ boundary_audit_rotate_duration }}"
+      rotate_max_files = {{ boundary_audit_rotate_max_files }}
+    }
+  }
+{% endif %}
+}
+
 kms "aead" {
   purpose   = "root"
   aead_type = "aes-gcm"

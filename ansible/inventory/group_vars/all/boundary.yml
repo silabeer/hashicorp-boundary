@@ -20,6 +20,15 @@ boundary_db_sslmode: require
 # Для apt указывайте полную версию из `apt list -a boundary`, например "1.2.3-1".
 boundary_version: ""
 
+# Аудит событий Boundary.
+# Все события всегда идут в journald (stderr sink). Дополнительно — файл
+# /var/log/boundary/audit.ndjson (cloudevents-json, ротация).
+boundary_audit_file_enabled: true
+boundary_audit_log_dir: /var/log/boundary
+boundary_audit_rotate_bytes: 104857600     # 100 MB
+boundary_audit_rotate_duration: 24h
+boundary_audit_rotate_max_files: 7
+
 # Адрес Vault (нужен роли vault_ssh_ca_trust; воркерам нужен доступ к Vault
 # для выдачи креденшелов на сессии).
 vault_addr: https://vault.example.com:8200

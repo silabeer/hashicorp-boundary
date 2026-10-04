@@ -6,7 +6,8 @@
       {% for env, desc in boundary_environments.items() %}
       {% set ns.p = ns.p + [
            {'name': env ~ '-servers', 'description': desc ~ ' (SSH)'},
-           {'name': env ~ '-kubernetes', 'description': desc ~ ' (Kubernetes)'}] %}
+           {'name': env ~ '-kubernetes', 'description': desc ~ ' (Kubernetes)'},
+           {'name': env ~ '-databases', 'description': desc ~ ' (Databases)'}] %}
       {% endfor %}
       {{ ns.p | to_json }}
 

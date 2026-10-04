@@ -53,6 +53,18 @@ boundary_k8s_clusters:
   # - {name: staging, api_address: 10.20.1.1, network: dc1, env: staging,
   #    vault_mount: k8s-staging, role: developer, namespace: default}
 
+# Базы данных: доступ через Vault database secrets engine (динамические креды).
+#   vault_mount — mount движка (vault secrets enable -path=<mount> database)
+#   role        — роль движка, выдающая временную пару логин/пароль
+#   db_type     — для документации пользователей (postgres, mysql, ...)
+# Имя уникально ГЛОБАЛЬНО. Креды выдаются brokered: клиент Boundary
+# (boundary connect postgres/mysql) подставляет их автоматически.
+boundary_databases:
+  # - {name: prod-pg, address: 10.30.0.5, port: 5432, network: dc1, env: prod,
+  #    vault_mount: db-prod-pg, role: readonly, db_type: postgres}
+  # - {name: prod-mysql, address: 10.30.0.6, port: 3306, network: dc1, env: prod,
+  #    vault_mount: db-prod-mysql, role: readonly, db_type: mysql}
+
 # Точечные доступы: группа Keycloak -> конкретные серверы и/или кластеры.
 # Дополняет env-wide группы boundary-<env>-server-access / -k8s-access.
 # Boundary не умеет deny (grants аддитивны): "запретить" = не выдавать доступ,

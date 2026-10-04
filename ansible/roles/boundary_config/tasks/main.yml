@@ -21,8 +21,9 @@
     that:
       - (boundary_servers | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
       - (boundary_k8s_clusters | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
+      - (boundary_databases | default([]) | map(attribute='env') | list) | difference(boundary_environments | list) | length == 0
     fail_msg: >-
-      Есть серверы/кластеры с env, которого нет в boundary_environments
+      Есть серверы/кластеры/базы с env, которого нет в boundary_environments
       (domain_config.yml).
 
 - name: Preflight — access rules ссылаются на существующие ресурсы
@@ -33,8 +34,10 @@
         | difference(boundary_servers | map(attribute='name') | list) | length == 0
       - (boundary_access_rules | default([]) | selectattr('clusters', 'defined') | map(attribute='clusters') | flatten | unique | reject('eq', '*') | list)
         | difference(boundary_k8s_clusters | map(attribute='name') | list) | length == 0
+      - (boundary_access_rules | default([]) | selectattr('databases', 'defined') | map(attribute='databases') | flatten | unique | reject('eq', '*') | list)
+        | difference(boundary_databases | default([]) | map(attribute='name') | list) | length == 0
     fail_msg: >-
-      boundary_access_rules ссылается на несуществующий env/сервер/кластер
+      boundary_access_rules ссылается на несуществующий env/сервер/кластер/базу
       (domain_config.yml).
 
 - name: Configure scopes

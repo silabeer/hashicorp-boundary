@@ -79,6 +79,9 @@ scripts/
 vault/
   boundary-controller-policy.hcl  # политика orphan-токена для Boundary
   k8s-vault-rbac.yaml             # SA+RBAC в кластере для Vault k8s engine
+docs/                             # документация для ПОЛЬЗОВАТЕЛЕЙ
+  README.md                       # вход, установка CLI
+  ssh.md / kubernetes.md / databases.md
 ```
 
 ## Развёртывание (quickstart)
@@ -156,6 +159,27 @@ PostgreSQL, Vault, Keycloak.
    Имя кластера — уникально ГЛОБАЛЬНО (поиск таргета по имени без скоупа).
 4. `--tags boundary_config`. Пользователи: `bkube <name>`.
 
+### Добавить базу данных
+
+1. В Vault — database secrets engine и роль с динамическими кредами
+   (пример для PostgreSQL):
+   ```bash
+   vault secrets enable -path=db-prod-pg database
+   vault write db-prod-pg/config/app \
+     plugin_name=postgresql-database-plugin \
+     connection_url='postgresql://{{username}}:{{password}}@10.30.0.5:5432/app' \
+     allowed_roles='readonly' username='vault' password='<пароль учётки vault в БД>'
+   vault write db-prod-pg/roles/readonly db_name=app \
+     creation_statements='CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"'; GRANT SELECT ON ALL TABLES IN SCHEMA public TO "{{name}}";' \
+     default_ttl=1h max_ttl=24h
+   ```
+   (Политика orphan-токена `db-*/creds/*` покрывает новый mount.)
+2. `domain_config.yml` → `boundary_databases` += `{name, address, port, network, env, vault_mount, role, db_type}`.
+   Имя — уникально ГЛОБАЛЬНО.
+3. `--tags boundary_config`. Пользователи ходят через
+   `boundary connect postgres -target-name prod-pg -target-scope-name prod-databases`
+   (см. `docs/databases.md`), доступ — группа `boundary-<env>-db-access`.
+
 ### Добавить сеть (новый сегмент/площадка)
 
 1. `hosts.ini` → `[boundary_workers]` += хост с `network=<новая сеть>`
@@ -196,8 +220,9 @@ Keycloak + две роли. Изоляция авторизационная: sta
 не может сделать authorize-session на prod-таргете.
 
 1. `domain_config.yml`: `boundary_environments += {staging: Staging}`.
-2. Keycloak: создать группы `boundary-staging-server-access` и
-   `boundary-staging-k8s-access`, добавить пользователей.
+2. Keycloak: создать группы `boundary-staging-server-access`,
+   `boundary-staging-k8s-access` и `boundary-staging-db-access`, добавить
+   пользователей.
 3. `--tags boundary_config` — роль сама создаст проекты, managed groups,
    роли, credential stores и библиотеки для нового env.
 4. Наполнить `boundary_servers` / `boundary_k8s_clusters` записями с
@@ -361,12 +386,22 @@ Vault SSH-сертификат с principal = этот пользователь 
 
 ## Пользовательская сторона
 
+Документация для пользователей — в [docs/](docs/README.md):
+[вход и установка CLI](docs/README.md),
+[SSH](docs/ssh.md), [Kubernetes](docs/kubernetes.md),
+[Базы данных](docs/databases.md).
+
+Кратко:
+
 ```bash
 # SSH (сертификат из Vault подставляется автоматически)
 ./scripts/bssh prod:web-01        # или: BSSH_ENV=prod ./scripts/bssh web-01
 
 # Kubernetes (SA-токен из Vault, прокси до API; имя — глобально уникальное)
 ./scripts/bkube prod -- get pods
+
+# PostgreSQL / MySQL (временные креды из Vault подставляются автоматически)
+boundary connect postgres -target-name prod-pg -target-scope-name prod-databases -dbname app
 ```
 
 Десктоп-клиенты: Boundary Desktop → логин через Keycloak → Connect к таргету;

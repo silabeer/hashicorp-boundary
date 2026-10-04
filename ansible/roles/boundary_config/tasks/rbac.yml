@@ -5,7 +5,8 @@
       {% set ns = namespace(g=['boundary-admins']) %}
       {% for env in boundary_environments %}
       {% set ns.g = ns.g + ['boundary-' ~ env ~ '-server-access',
-                            'boundary-' ~ env ~ '-k8s-access'] %}
+                            'boundary-' ~ env ~ '-k8s-access',
+                            'boundary-' ~ env ~ '-db-access'] %}
       {% endfor %}
       {% for rule in boundary_access_rules | default([]) %}
       {% set ns.g = ns.g + [rule.group] %}
@@ -33,6 +34,10 @@
            {'name': 'k8s-access',
             'scope': env ~ '-kubernetes',
             'group': 'boundary-' ~ env ~ '-k8s-access',
+            'grants': boundary_access_grants},
+           {'name': 'db-access',
+            'scope': env ~ '-databases',
+            'group': 'boundary-' ~ env ~ '-db-access',
             'grants': boundary_access_grants}] %}
       {% endfor %}
       {{ ns.r | to_json }}

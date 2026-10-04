@@ -27,3 +27,8 @@ path "ssh/sign/boundary" {
 path "k8s-*/creds/*" {
   capabilities = ["update"]
 }
+
+# Динамические креды баз данных (по mount'у на каждую БД)
+path "db-*/creds/*" {
+  capabilities = ["update"]
+}

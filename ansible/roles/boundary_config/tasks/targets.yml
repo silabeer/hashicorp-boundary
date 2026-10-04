@@ -85,3 +85,46 @@
     executable: /bin/bash
   loop: "{{ _t_k8s_lookup.results }}"
   changed_when: false
+
+- name: Find database targets
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets list -scope-id {{ _project_ids[item.env ~ '-databases'] }} -format json \
+      | jq -r --arg n "{{ item.name }}" '.items[] | select(.name==$n and .type=="tcp") | .id'
+  args:
+    executable: /bin/bash
+  loop: "{{ boundary_databases | default([]) }}"
+  changed_when: false
+  register: _t_db_lookup
+
+- name: Create database targets
+  when: (item.stdout | trim) == ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets create tcp \
+      -scope-id {{ _project_ids[item.item.env ~ '-databases'] }} \
+      -name {{ item.item.name }} \
+      -address {{ item.item.address }} \
+      -default-port {{ item.item.port }} -session-connection-limit -1 \
+      -brokered-credential-source {{ _lib_db_ids[item.item.name] }} \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' \
+      -description "Managed by Ansible (GitOps)" -format json | jq -r .item.id
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_db_lookup.results }}"
+  register: _t_db_create
+
+- name: Update database targets
+  when: (item.stdout | trim) != ""
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _boundary_conn_flags }} targets update tcp -id {{ item.stdout | trim }} \
+      -address {{ item.item.address }} \
+      -default-port {{ item.item.port }} -session-connection-limit -1 \
+      -egress-worker-filter '{{ '"' ~ item.item.network ~ '" in "/tags/network"' }}' >/dev/null
+    {{ _boundary_conn_flags }} targets set-credential-sources -id {{ item.stdout | trim }} \
+      -brokered-credential-source {{ _lib_db_ids[item.item.name] }} >/dev/null
+  args:
+    executable: /bin/bash
+  loop: "{{ _t_db_lookup.results }}"
+  changed_when: false

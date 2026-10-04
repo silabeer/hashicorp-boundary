@@ -296,13 +296,48 @@ Boundary сам продлевает store-токен; при пересозда
   `/var/log/boundary/audit.ndjson` (формат cloudevents-json, ротация по
   размеру/времени — параметры `boundary_audit_*` в `boundary.yml`).
 
-Внутри: кто аутентифицировался (Keycloak identity), authorize-session
-(пользователь → таргет), старт/стоп сессий и соединений, управляющие
-действия. Ключи/пароли/токены в события не попадают.
+События (каждое — JSON со вложенным `data.request_info`: method, path,
+client_ip, trace-id; у audit-событий есть `serialized` + `serialized_hmac`
+для контроля целостности):
 
-Чего в файле НЕТ: записи команд и вывода терминала — это session recording
-(BSR), фича Enterprise/HCP. Для долгосрочного хранения забирайте ndjson
-fluent-bit/vector → SIEM.
+- **аутентификация** — audit, путь содержит `:authenticate` (кто вошёл,
+  откуда client_ip);
+- **авторизация сессии** — audit, путь `/v1/targets/<target_id>:authorize-session`:
+  кто, когда, к какому таргету (в `response.details` — идентификаторы
+  сессии/пользователя/хоста);
+- **жизненный цикл сессии** — audit методов `SessionService`
+  (`LookupSession`, `ActivateSession`, `AuthorizeConnection`,
+  `CloseConnection`, `CancelConnection`): открытие/закрытие соединений,
+  объёмы, длительность;
+- **админские действия** — create/update/delete ресурсов;
+- system/observation — состояние воркеров и пр.
+
+Примеры запросов:
+
+```bash
+# Кто куда подключался (authorize-session)
+jq -r 'select(.data.request_info.path // "" | contains(":authorize-session"))
+  | [.time, (.data.request_info.client_ip // "-"), .data.request_info.path] | @tsv' \
+  /var/log/boundary/audit.ndjson
+
+# Логины (authenticate)
+jq -r 'select(.data.request_info.path // "" | contains(":authenticate"))
+  | [.time, (.data.request_info.client_ip // "-"), .data.request_info.path] | @tsv' \
+  /var/log/boundary/audit.ndjson
+
+# Жизненный цикл сессий
+jq -r 'select(.data.request_info.method // "" | contains("SessionService"))
+  | [.time, .data.request_info.method] | @tsv' /var/log/boundary/audit.ndjson
+```
+
+Чего в файле НЕТ: **команд и их вывода** — содержимое SSH-сеансов, SQL-запросов
+и kubectl-команд Boundary не видит и не пишет. Это session recording (BSR),
+фича Enterprise/HCP. «Какие команды выполнял пользователь» для SSH ищите в
+auditd/sudo-логах на самих серверах (время сессии из Boundary — якорь для
+корреляции), для k8s — в audit log kube-apiserver: каждая сессия ходит под
+уникальным SA (`v-token-...`), так что запросы однозначно атрибутируются.
+
+Для долгосрочного хранения забирайте ndjson fluent-bit/vector → SIEM.
 
 ### Как разрешать/запрещать доступ пользователей к разным серверам?
 
